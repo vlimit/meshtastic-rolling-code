@@ -102,6 +102,7 @@ public:
 
 protected:
   TwoWire *i2c_dev = NULL; ///< Pointer to I2C bus interface
+  uint8_t i2c_addr = 0;
 };
 
 /*!

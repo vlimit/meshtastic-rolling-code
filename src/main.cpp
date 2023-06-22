@@ -255,7 +255,10 @@ void setup()
     Wire.begin();
 #endif
 
-    Adafruit_7segment sevenseg = Adafruit_7segment(Wire);
+    Adafruit_7segment sevenseg = Adafruit_7segment();
+    sevenseg.begin(0x70, &Wire1);
+
+    sevenseg.printNumber(1234);
 
 #ifdef PIN_LCD_RESETk
     // FIXME - move this someplace better, LCD is at address 0x3F
