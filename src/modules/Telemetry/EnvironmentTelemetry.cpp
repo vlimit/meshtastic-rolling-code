@@ -59,16 +59,19 @@ int32_t EnvironmentTelemetryModule::runOnce()
     // moduleConfig.telemetry.environment_screen_enabled = 1;
     // moduleConfig.telemetry.environment_update_interval = 45;
 
-    if (!(moduleConfig.telemetry.environment_measurement_enabled || moduleConfig.telemetry.environment_screen_enabled)) {
+    if (!(moduleConfig.telemetry.environment_measurement_enabled || moduleConfig.telemetry.environment_screen_enabled))
+    {
         // If this module is not enabled, and the user doesn't want the display screen don't waste any OSThread time on it
         return disable();
     }
 
-    if (firstTime) {
+    if (firstTime)
+    {
         // This is the first time the OSThread library has called this function, so do some setup
         firstTime = 0;
 
-        if (moduleConfig.telemetry.environment_measurement_enabled) {
+        if (moduleConfig.telemetry.environment_measurement_enabled)
+        {
             LOG_INFO("Environment Telemetry: Initializing\n");
             // it's possible to have this module enabled, only for displaying values on the screen.
             // therefore, we should only enable the sensor loop if measurement is also enabled
@@ -80,19 +83,24 @@ int32_t EnvironmentTelemetryModule::runOnce()
                 result = bme680Sensor.runOnce();
             if (mcp9808Sensor.hasSensor())
                 result = mcp9808Sensor.runOnce();
-            if (shtc3Sensor.hasSensor())
-                result = shtc3Sensor.runOnce();
+            //            if (shtc3Sensor.hasSensor())
+            //                result = shtc3Sensor.runOnce();
             if (lps22hbSensor.hasSensor())
                 result = lps22hbSensor.runOnce();
             if (sht31Sensor.hasSensor())
                 result = sht31Sensor.runOnce();
         }
         return result;
-    } else {
+    }
+    else
+    {
         // if we somehow got to a second run of this module with measurement disabled, then just wait forever
-        if (!moduleConfig.telemetry.environment_measurement_enabled) {
+        if (!moduleConfig.telemetry.environment_measurement_enabled)
+        {
             return disable();
-        } else {
+        }
+        else
+        {
             if (bme680Sensor.hasSensor())
                 result = bme680Sensor.runTrigger();
         }
@@ -100,11 +108,14 @@ int32_t EnvironmentTelemetryModule::runOnce()
         uint32_t now = millis();
         if (((lastSentToMesh == 0) ||
              ((now - lastSentToMesh) >= getConfiguredOrDefaultMs(moduleConfig.telemetry.environment_update_interval))) &&
-            airTime->isTxAllowedAirUtil()) {
+            airTime->isTxAllowedAirUtil())
+        {
             sendTelemetry();
             lastSentToMesh = now;
-        } else if (((lastSentToPhone == 0) || ((now - lastSentToPhone) >= sendToPhoneIntervalMs)) &&
-                   (service.isToPhoneQueueEmpty())) {
+        }
+        else if (((lastSentToPhone == 0) || ((now - lastSentToPhone) >= sendToPhoneIntervalMs)) &&
+                 (service.isToPhoneQueueEmpty()))
+        {
             // Just send to phone when it's not our time to send to mesh yet
             // Only send while queue is empty (phone assumed connected)
             sendTelemetry(NODENUM_BROADCAST, true);
@@ -141,7 +152,8 @@ void EnvironmentTelemetryModule::drawFrame(OLEDDisplay *display, OLEDDisplayUiSt
     display->setTextAlignment(TEXT_ALIGN_LEFT);
     display->setFont(FONT_MEDIUM);
     display->drawString(x, y, "Environment");
-    if (lastMeasurementPacket == nullptr) {
+    if (lastMeasurementPacket == nullptr)
+    {
         display->setFont(FONT_SMALL);
         display->drawString(x, y += fontHeight(FONT_MEDIUM), "No measurement");
         return;
@@ -153,7 +165,8 @@ void EnvironmentTelemetryModule::drawFrame(OLEDDisplay *display, OLEDDisplayUiSt
     const char *lastSender = getSenderShortName(*lastMeasurementPacket);
 
     auto &p = lastMeasurementPacket->decoded;
-    if (!pb_decode_from_bytes(p.payload.bytes, p.payload.size, &meshtastic_Telemetry_msg, &lastMeasurement)) {
+    if (!pb_decode_from_bytes(p.payload.bytes, p.payload.size, &meshtastic_Telemetry_msg, &lastMeasurement))
+    {
         display->setFont(FONT_SMALL);
         display->drawString(x, y += fontHeight(FONT_MEDIUM), "Measurement Error");
         LOG_ERROR("Unable to decode last packet");
@@ -162,7 +175,8 @@ void EnvironmentTelemetryModule::drawFrame(OLEDDisplay *display, OLEDDisplayUiSt
 
     display->setFont(FONT_SMALL);
     String last_temp = String(lastMeasurement.variant.environment_metrics.temperature, 0) + "°C";
-    if (moduleConfig.telemetry.environment_display_fahrenheit) {
+    if (moduleConfig.telemetry.environment_display_fahrenheit)
+    {
         last_temp = String(CelsiusToFahrenheit(lastMeasurement.variant.environment_metrics.temperature), 0) + "°F";
     }
     display->drawString(x, y += fontHeight(FONT_MEDIUM) - 2, "From: " + String(lastSender) + "(" + String(agoSecs) + "s)");
@@ -180,7 +194,8 @@ void EnvironmentTelemetryModule::drawFrame(OLEDDisplay *display, OLEDDisplayUiSt
 
 bool EnvironmentTelemetryModule::handleReceivedProtobuf(const meshtastic_MeshPacket &mp, meshtastic_Telemetry *t)
 {
-    if (t->which_variant == meshtastic_Telemetry_environment_metrics_tag) {
+    if (t->which_variant == meshtastic_Telemetry_environment_metrics_tag)
+    {
 #ifdef DEBUG_PORT
         const char *sender = getSenderShortName(mp);
 
@@ -233,7 +248,8 @@ bool EnvironmentTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
     if (ina260Sensor.hasSensor())
         valid = ina260Sensor.getMetrics(&m);
 
-    if (valid) {
+    if (valid)
+    {
         LOG_INFO("(Sending): barometric_pressure=%f, current=%f, gas_resistance=%f, relative_humidity=%f, temperature=%f, "
                  "voltage=%f\n",
                  m.variant.environment_metrics.barometric_pressure, m.variant.environment_metrics.current,
@@ -254,10 +270,13 @@ bool EnvironmentTelemetryModule::sendTelemetry(NodeNum dest, bool phoneOnly)
             packetPool.release(lastMeasurementPacket);
 
         lastMeasurementPacket = packetPool.allocCopy(*p);
-        if (phoneOnly) {
+        if (phoneOnly)
+        {
             LOG_INFO("Sending packet to phone\n");
             service.sendToPhone(p);
-        } else {
+        }
+        else
+        {
             LOG_INFO("Sending packet to mesh\n");
             service.sendToMesh(p, RX_SRC_LOCAL, true);
         }
