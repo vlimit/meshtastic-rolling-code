@@ -28,12 +28,14 @@
 #include "target_specific.h"
 #include <Wire.h>
 #include <memory>
+
 // #include <driver/rtc_io.h>
 
 #include "mesh/eth/ethClient.h"
 #include "mesh/http/WiFiAPClient.h"
 
 #include "Adafruit_LEDBackpack.h"
+#include "HT16K33.h"
 
 #ifdef ARCH_ESP32
 #include "mesh/http/WebServer.h"
@@ -181,6 +183,26 @@ __attribute__((weak, noinline)) bool loopCanSleep()
     return true;
 }
 
+uint16_t crc16(const uint8_t *buffer, int length)
+{
+    uint16_t crc16 = 0;
+    while (length != 0)
+    {
+        crc16 = (uint8_t)(crc16 >> 8) | (crc16 << 8);
+        crc16 ^= *buffer;
+        crc16 ^= (uint8_t)(crc16 & 0xff) >> 4;
+        crc16 ^= (crc16 << 8) << 4;
+        crc16 ^= ((crc16 & 0xff) << 4) << 1;
+        buffer++;
+        length--;
+    }
+
+    return crc16;
+}
+
+TwoWire *sevenseg_bus;
+HT16K33 *sevenseg;
+
 void setup()
 {
     concurrency::hasBeenSetup = true;
@@ -255,11 +277,6 @@ void setup()
     Wire.begin();
 #endif
 
-    Adafruit_7segment sevenseg = Adafruit_7segment();
-    sevenseg.begin(0x70, &Wire1);
-
-    sevenseg.printNumber(1234);
-
 #ifdef PIN_LCD_RESETk
     // FIXME - move this someplace better, LCD is at address 0x3F
     pinMode(PIN_LCD_RESET, OUTPUT);
@@ -292,8 +309,7 @@ void setup()
     // accessories
     auto i2cScanner = std::unique_ptr<ScanI2CTwoWire>(new ScanI2CTwoWire());
 
-    LOG_INFO("Scanning for i2c devices...\n");
-
+    LOG_INFO("Scanning for i2c devices\n");
 #ifdef I2C_SDA1
     Wire1.begin(I2C_SDA1, I2C_SCL1);
     i2cScanner->scanPort(ScanI2C::I2CPort::WIRE1);
@@ -315,6 +331,59 @@ void setup()
     {
         LOG_INFO("%i I2C devices found\n", i2cCount);
     }
+
+    uint16_t val;
+    ScanI2C::DeviceAddress addr(ScanI2C::I2CPort::WIRE, 0x70);
+    val = i2cScanner->getRegisterValue(ScanI2CTwoWire::RegisterLocation(addr, 0), 1);
+
+    sevenseg_bus = i2cScanner->fetchI2CBus(ScanI2CTwoWire::DeviceAddress(addr));
+
+#if 0
+    sevenseg_bus->beginTransmission(addr.address);
+    sevenseg_bus->write((uint8_t)0x00);
+    sevenseg_bus->write((uint8_t)0xff);
+    sevenseg_bus->endTransmission();
+
+    uint8_t buffer[6];
+    sevenseg_bus->beginTransmission(addr.address);
+    buffer[0] = 0;
+    sevenseg_bus->write(buffer, 0);
+    sevenseg_bus->endTransmission();
+    sevenseg_bus->requestFrom(addr.address, 1);
+    buffer[0] = Wire1.read();
+
+    LOG_INFO("Read back %d\n", buffer[0]);
+
+    LOG_DEBUG("**************\n");
+    vTaskDelay(2000);
+    LOG_DEBUG("**************\n");
+    Adafruit_7segment sevenseg = Adafruit_7segment();
+    //    sevenseg.begin(0x70, &Wire);
+    sevenseg.begin(0x70, sevenseg_bus);
+    sevenseg.printNumber(1234);
+    sevenseg.writeDisplay();
+#endif
+
+    sevenseg = new HT16K33(0x70, sevenseg_bus);
+    sevenseg->begin();
+    //    Wire.setClock(100000);
+    sevenseg->displayOn();
+    sevenseg->brightness(15);
+    sevenseg->displayClear();
+    sevenseg->blink(0);
+
+    sevenseg->cacheOff();
+
+#if 0
+    seg.displayTest(255);
+
+    uint8_t x[4] = {255, 255, 255, 255};
+    seg.displayClear();
+    delay(1000);
+    seg.displayRaw(x);
+    delay(1000);
+    seg.displayRaw(x, true);
+#endif
 
 #ifdef ARCH_ESP32
     // Don't init display if we don't have one or we are waking headless due to a timer event
@@ -404,7 +473,7 @@ void setup()
     SCANNER_TO_SENSORS_MAP(ScanI2C::DeviceType::MCP9808, meshtastic_TelemetrySensorType_MCP9808)
     SCANNER_TO_SENSORS_MAP(ScanI2C::DeviceType::MCP9808, meshtastic_TelemetrySensorType_MCP9808)
     SCANNER_TO_SENSORS_MAP(ScanI2C::DeviceType::SHT31, meshtastic_TelemetrySensorType_SHT31)
-    SCANNER_TO_SENSORS_MAP(ScanI2C::DeviceType::SHTC3, meshtastic_TelemetrySensorType_SHTC3)
+    //    SCANNER_TO_SENSORS_MAP(ScanI2C::DeviceType::SHTC3, meshtastic_TelemetrySensorType_SHTC3)
     SCANNER_TO_SENSORS_MAP(ScanI2C::DeviceType::LPS22HB, meshtastic_TelemetrySensorType_LPS22)
     SCANNER_TO_SENSORS_MAP(ScanI2C::DeviceType::QMC6310, meshtastic_TelemetrySensorType_QMC6310)
     SCANNER_TO_SENSORS_MAP(ScanI2C::DeviceType::QMI8658, meshtastic_TelemetrySensorType_QMI8658)
@@ -798,6 +867,25 @@ void loop()
     // handleWebResponse();
 
     service.loop();
+
+    static uint16_t last_time_code = 0;
+    struct timeval tv;
+    tv.tv_sec = getTime();
+    tv.tv_usec = 0;
+
+    tm *t = localtime(&tv.tv_sec);
+    uint32_t time_code = (t->tm_hour * 60 + t->tm_min) * 60 + t->tm_min;
+    time_code /= 10;
+
+    if (last_time_code != time_code)
+    {
+        last_time_code = time_code;
+        LOG_INFO("time     : %d:%d:%d\n", t->tm_hour, t->tm_min, t->tm_sec);
+        LOG_INFO("time_code: %d\n", time_code);
+        time_code = crc16((uint8_t const *)&time_code, sizeof(time_code));
+        LOG_INFO("crc_code : %x\n", time_code);
+        sevenseg->displayHex(time_code);
+    }
 
     long delayMsec = mainController.runOrDelay();
 
